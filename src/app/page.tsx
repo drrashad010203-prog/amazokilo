@@ -11,6 +11,9 @@ export default function Home() {
           <p className="text-neutral-400 text-lg max-w-2xl mx-auto">
             أدخل اسم المنتج أو قائمة منتجات للبحث عن صورها على أمازون مصر
           </p>
+          <p className="text-neutral-500 text-sm mt-2">
+            عند الضغط على &quot;تحميل كل الصور&quot; اختر مجلد &quot;صور المنتجات&quot; على سطح المكتب
+          </p>
         </header>
         <SearchClient />
         <footer className="text-center mt-16 text-neutral-600 text-sm">

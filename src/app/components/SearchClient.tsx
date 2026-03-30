@@ -16,11 +16,25 @@ interface SearchResult {
   error?: string;
 }
 
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export default function SearchClient() {
   const [input, setInput] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -59,15 +73,86 @@ export default function SearchClient() {
     }
   }
 
-  function handleDownload(imageUrl: string, title: string) {
-    const link = document.createElement("a");
-    link.href = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
-    link.download = `${title.slice(0, 50)}.jpg`;
-    link.target = "_blank";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  async function fetchImageBlob(imageUrl: string): Promise<Blob> {
+    const res = await fetch(
+      `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`
+    );
+    if (!res.ok) throw new Error("فشل تحميل الصورة");
+    return res.blob();
   }
+
+  async function handleDownloadSingle(imageUrl: string, title: string) {
+    try {
+      const blob = await fetchImageBlob(imageUrl);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${sanitizeFilename(title)}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      const a = document.createElement("a");
+      a.href = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
+      a.download = `${sanitizeFilename(title)}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }
+
+  async function handleDownloadAll() {
+    const allProducts = results.flatMap((r) => r.products);
+    if (allProducts.length === 0) return;
+
+    setDownloadingAll(true);
+    setDownloadProgress({ current: 0, total: allProducts.length });
+
+    try {
+      // @ts-expect-error showDirectoryPicker is not in TS types yet
+      if (typeof window.showDirectoryPicker === "function") {
+        // @ts-expect-error showDirectoryPicker
+        const dirHandle = await window.showDirectoryPicker({
+          mode: "readwrite",
+          startIn: "desktop",
+        });
+
+        let count = 0;
+        for (const product of allProducts) {
+          try {
+            const blob = await fetchImageBlob(product.image);
+            const fileName = `${sanitizeFilename(product.title)}.jpg`;
+            const fileHandle = await dirHandle.getFileHandle(fileName, {
+              create: true,
+            });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          } catch {
+            // skip failed images
+          }
+          count++;
+          setDownloadProgress({ current: count, total: allProducts.length });
+          await sleep(300);
+        }
+      } else {
+        for (let i = 0; i < allProducts.length; i++) {
+          const product = allProducts[i];
+          await handleDownloadSingle(product.image, product.title);
+          setDownloadProgress({ current: i + 1, total: allProducts.length });
+          await sleep(500);
+        }
+      }
+    } catch {
+      // user cancelled or error
+    } finally {
+      setDownloadingAll(false);
+      setDownloadProgress({ current: 0, total: 0 });
+    }
+  }
+
+  const totalProducts = results.reduce((sum, r) => sum + r.products.length, 0);
 
   return (
     <div className="space-y-8">
@@ -132,6 +217,47 @@ export default function SearchClient() {
         </div>
       )}
 
+      {results.length > 0 && totalProducts > 0 && (
+        <div className="flex flex-col sm:flex-row items-center gap-4 bg-neutral-800/80 border border-neutral-700 rounded-xl p-4">
+          <div className="flex-1 text-white">
+            <span className="font-bold text-orange-400">{totalProducts}</span>{" "}
+            صورة متاحة للتحميل
+          </div>
+          <button
+            onClick={handleDownloadAll}
+            disabled={downloadingAll}
+            className="bg-green-600 hover:bg-green-700 disabled:bg-neutral-600 text-white font-bold py-3 px-6 rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+          >
+            {downloadingAll ? (
+              <>
+                <svg
+                  className="animate-spin h-5 w-5"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                جاري التحميل... {downloadProgress.current}/{downloadProgress.total}
+              </>
+            ) : (
+              <>📥 تحميل كل الصور</>
+            )}
+          </button>
+        </div>
+      )}
+
       {results.length > 0 && (
         <div className="space-y-10">
           {results.map((result, idx) => (
@@ -170,7 +296,7 @@ export default function SearchClient() {
                         />
                         <button
                           onClick={() =>
-                            handleDownload(product.image, product.title)
+                            handleDownloadSingle(product.image, product.title)
                           }
                           className="absolute top-2 left-2 bg-black/70 hover:bg-orange-600 text-white p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                           title="تحميل الصورة"

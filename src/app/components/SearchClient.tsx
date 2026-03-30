@@ -207,7 +207,7 @@ export default function SearchClient() {
               جاري البحث...
             </span>
           ) : (
-            "🔍 بحث على أمازون مصر"
+            "🔍 بحث على نون مصر"
           )}
         </button>
       </form>
@@ -383,7 +383,7 @@ export default function SearchClient() {
                             rel="noopener noreferrer"
                             className="block text-center bg-neutral-700 hover:bg-orange-600 text-white text-sm py-2 rounded-lg transition-colors"
                           >
-                            عرض على أمازون
+                            عرض على نون
                           </a>
                         )}
                       </div>

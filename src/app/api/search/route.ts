@@ -18,88 +18,65 @@ interface SearchResult {
   error?: string;
 }
 
-function extractProductBlocks(html: string): string[] {
-  const blocks: string[] = [];
-  const marker = 'data-component-type="s-search-result"';
-  let start = 0;
+function extractNoonProducts(html: string): Product[] {
+  const hitsIdx = html.indexOf('\\"hits\\":[');
+  if (hitsIdx === -1) return [];
 
-  while (true) {
-    const idx = html.indexOf(marker, start);
-    if (idx === -1) break;
-    const nextIdx = html.indexOf(marker, idx + marker.length);
-    const block =
-      nextIdx === -1
-        ? html.substring(idx)
-        : html.substring(idx, nextIdx);
-    blocks.push(block);
-    start = nextIdx === -1 ? html.length : nextIdx;
-  }
+  const section = html.slice(hitsIdx);
+  const productBlocks = section.split('\\"offer_code\\":');
+  const products: Product[] = [];
 
-  return blocks;
-}
+  for (let i = 1; i < productBlocks.length && products.length < 12; i++) {
+    const block = productBlocks[i];
 
-function parseProduct(block: string): Product | null {
-  const imgMatch = block.match(
-    /class="s-image"[^>]*src="([^"]+)"/
-  );
-  if (!imgMatch) return null;
-
-  const titleMatch = block.match(
-    /<h2[^>]*aria-label="([^"]{10,})"/
-  );
-  if (!titleMatch) return null;
-
-  const linkMatch =
-    block.match(
-      /data-cy="title-recipe"[\s\S]*?href="([^"]+)"/
-    ) ||
-    block.match(
-      /class="a-link-normal[^"]*"[^>]*href="([^"]+)"/
+    const nameMatch = block.match(/\\"name\\":\\"([^\\]{15,}?)\\"/);
+    const skuMatch = block.match(/\\"sku\\":\\"(N[A-Z0-9]+)\\"/);
+    const imgMatch = block.match(/\\"image_url\\":\\"(https:[^\\]+\.jpg)/);
+    const priceMatch = block.match(/\\"price\\":(\d{4,})/);
+    const salePriceMatch = block.match(/\\"sale_price\\":(\d{4,})/);
+    const slugMatch = block.match(
+      /\\"url\\":\\"([a-z0-9][a-z0-9-]{10,}[a-z0-9])\\"/
     );
 
-  const priceWholeMatch = block.match(
-    /class="a-price-whole">([^<]+)/
-  );
-  const priceFractionMatch = block.match(
-    /class="a-price-fraction">([^<]+)/
-  );
+    if (!nameMatch || !skuMatch) continue;
 
-  const ratingMatch = block.match(
-    /aria-label="([\d.]+ out of 5 stars)/
-  );
+    const rawPrice = salePriceMatch
+      ? parseInt(salePriceMatch[1])
+      : priceMatch
+        ? parseInt(priceMatch[1])
+        : 0;
+    const priceStr = rawPrice
+      ? `${(rawPrice / 100).toLocaleString("en-EG")} ج.م`
+      : "السعر غير متاح";
 
-  const price = priceWholeMatch
-    ? `${priceWholeMatch[1].trim()}${priceFractionMatch ? "." + priceFractionMatch[1].trim() : ""} ج.م`
-    : "السعر غير متاح";
+    const imageUrl = imgMatch
+      ? imgMatch[1].replace(/\\\//g, "/")
+      : "";
 
-  let link = "";
-  if (linkMatch) {
-    const rawLink = linkMatch[1].split("/ref=")[0];
-    link = rawLink.startsWith("http")
-      ? rawLink
-      : `https://www.amazon.eg${rawLink}`;
+    const link = slugMatch
+      ? `https://www.noon.com/egypt-en/p/${slugMatch[1]}/n/${skuMatch[1]}/`
+      : `https://www.noon.com/egypt-en/search/?q=${encodeURIComponent(nameMatch[1])}`;
+
+    products.push({
+      title: nameMatch[1],
+      image: imageUrl,
+      price: priceStr,
+      link,
+      rating: "",
+    });
   }
 
-  return {
-    title: titleMatch[1],
-    image: imgMatch[1],
-    price,
-    link,
-    rating: ratingMatch ? ratingMatch[1] : "",
-  };
+  return products;
 }
 
-async function searchAmazonEG(
-  query: string
-): Promise<Product[]> {
-  const url = `https://www.amazon.eg/s?k=${encodeURIComponent(query)}&language=en`;
+async function searchNoonEG(query: string): Promise<Product[]> {
+  const url = `https://www.noon.com/egypt-en/search/?q=${encodeURIComponent(query)}`;
 
   const res = await fetch(url, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      Accept: "text/html",
       "Accept-Language": "en-US,en;q=0.9",
     },
     redirect: "follow",
@@ -107,20 +84,11 @@ async function searchAmazonEG(
   });
 
   if (!res.ok) {
-    throw new Error(`Amazon returned ${res.status}`);
+    throw new Error(`Noon returned ${res.status}`);
   }
 
   const html = await res.text();
-  const blocks = extractProductBlocks(html);
-  const products: Product[] = [];
-
-  for (const block of blocks) {
-    if (products.length >= 12) break;
-    const product = parseProduct(block);
-    if (product) products.push(product);
-  }
-
-  return products;
+  return extractNoonProducts(html);
 }
 
 export async function POST(request: NextRequest) {
@@ -150,7 +118,7 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          const products = await searchAmazonEG(trimmedQuery);
+          const products = await searchNoonEG(trimmedQuery);
           return { query: trimmedQuery, products };
         } catch (error) {
           return {

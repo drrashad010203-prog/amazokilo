@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent } from "react";
+import JSZip from "jszip";
 
 interface Product {
   title: string;
@@ -24,17 +25,16 @@ function sanitizeFilename(name: string): string {
     .slice(0, 80);
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 export default function SearchClient() {
   const [input, setInput] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [downloadingAll, setDownloadingAll] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
+  const [downloadProgress, setDownloadProgress] = useState({
+    current: 0,
+    total: 0,
+  });
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -73,17 +73,13 @@ export default function SearchClient() {
     }
   }
 
-  async function fetchImageBlob(imageUrl: string): Promise<Blob> {
-    const res = await fetch(
-      `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`
-    );
-    if (!res.ok) throw new Error("فشل تحميل الصورة");
-    return res.blob();
-  }
-
   async function handleDownloadSingle(imageUrl: string, title: string) {
     try {
-      const blob = await fetchImageBlob(imageUrl);
+      const res = await fetch(
+        `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`
+      );
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -96,6 +92,7 @@ export default function SearchClient() {
       const a = document.createElement("a");
       a.href = `/api/proxy-image?url=${encodeURIComponent(imageUrl)}`;
       a.download = `${sanitizeFilename(title)}.jpg`;
+      a.target = "_blank";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -110,49 +107,54 @@ export default function SearchClient() {
     setDownloadProgress({ current: 0, total: allProducts.length });
 
     try {
-      // @ts-expect-error showDirectoryPicker is not in TS types yet
-      if (typeof window.showDirectoryPicker === "function") {
-        // @ts-expect-error showDirectoryPicker
-        const dirHandle = await window.showDirectoryPicker({
-          mode: "readwrite",
-          startIn: "desktop",
-        });
+      const zip = new JSZip();
+      const folder = zip.folder("صور المنتجات");
 
-        let count = 0;
-        for (const product of allProducts) {
-          try {
-            const blob = await fetchImageBlob(product.image);
-            const fileName = `${sanitizeFilename(product.title)}.jpg`;
-            const fileHandle = await dirHandle.getFileHandle(fileName, {
-              create: true,
-            });
-            const writable = await fileHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-          } catch {
-            // skip failed images
+      let count = 0;
+      const seenNames = new Set<string>();
+
+      for (const product of allProducts) {
+        try {
+          const res = await fetch(
+            `/api/proxy-image?url=${encodeURIComponent(product.image)}`
+          );
+          if (res.ok) {
+            const blob = await res.blob();
+            let fileName = `${sanitizeFilename(product.title)}.jpg`;
+            if (seenNames.has(fileName)) {
+              fileName = `${sanitizeFilename(product.title)}_${count}.jpg`;
+            }
+            seenNames.add(fileName);
+            folder?.file(fileName, blob);
           }
-          count++;
-          setDownloadProgress({ current: count, total: allProducts.length });
-          await sleep(300);
+        } catch {
+          // skip failed images
         }
-      } else {
-        for (let i = 0; i < allProducts.length; i++) {
-          const product = allProducts[i];
-          await handleDownloadSingle(product.image, product.title);
-          setDownloadProgress({ current: i + 1, total: allProducts.length });
-          await sleep(500);
-        }
+        count++;
+        setDownloadProgress({ current: count, total: allProducts.length });
       }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `صور المنتجات - Amazon EG.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch {
-      // user cancelled or error
+      // error creating zip
     } finally {
       setDownloadingAll(false);
       setDownloadProgress({ current: 0, total: 0 });
     }
   }
 
-  const totalProducts = results.reduce((sum, r) => sum + r.products.length, 0);
+  const totalProducts = results.reduce(
+    (sum, r) => sum + r.products.length,
+    0
+  );
 
   return (
     <div className="space-y-8">
@@ -173,7 +175,9 @@ export default function SearchClient() {
             onChange={(e) => setInput(e.target.value)}
             rows={5}
             className="w-full rounded-xl bg-neutral-800 border border-neutral-700 text-white p-4 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent placeholder-neutral-500 resize-none text-base"
-            placeholder={"iPhone 16 Pro Max\nSamsung Galaxy S24\nسماعات بلوتوث"}
+            placeholder={
+              "iPhone 16 Pro Max\nSamsung Galaxy S24\nسماعات بلوتوث"
+            }
             dir="auto"
           />
         </div>
@@ -184,10 +188,7 @@ export default function SearchClient() {
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <svg
-                className="animate-spin h-5 w-5"
-                viewBox="0 0 24 24"
-              >
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                 <circle
                   className="opacity-25"
                   cx="12"
@@ -218,43 +219,83 @@ export default function SearchClient() {
       )}
 
       {results.length > 0 && totalProducts > 0 && (
-        <div className="flex flex-col sm:flex-row items-center gap-4 bg-neutral-800/80 border border-neutral-700 rounded-xl p-4">
-          <div className="flex-1 text-white">
-            <span className="font-bold text-orange-400">{totalProducts}</span>{" "}
-            صورة متاحة للتحميل
-          </div>
-          <button
-            onClick={handleDownloadAll}
-            disabled={downloadingAll}
-            className="bg-green-600 hover:bg-green-700 disabled:bg-neutral-600 text-white font-bold py-3 px-6 rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
-          >
-            {downloadingAll ? (
-              <>
-                <svg
-                  className="animate-spin h-5 w-5"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
+        <div className="bg-gradient-to-r from-green-900/40 to-green-800/30 border border-green-700/60 rounded-2xl p-5">
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <div className="flex-1 text-white text-center sm:text-right">
+              <p className="text-lg font-bold">
+                <span className="text-green-400 text-2xl">{totalProducts}</span>{" "}
+                صورة متاحة للتحميل
+              </p>
+              <p className="text-neutral-400 text-sm mt-1">
+                سيتم تحميل كل الصور كملف مضغوط واحد
+              </p>
+            </div>
+            <button
+              onClick={handleDownloadAll}
+              disabled={downloadingAll}
+              className="bg-green-600 hover:bg-green-500 disabled:bg-neutral-600 text-white font-bold py-4 px-8 rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed flex items-center gap-3 whitespace-nowrap text-lg shadow-lg shadow-green-900/30"
+            >
+              {downloadingAll ? (
+                <>
+                  <svg
+                    className="animate-spin h-6 w-6"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                      fill="none"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  <span>
+                    جاري التحميل... {downloadProgress.current}/
+                    {downloadProgress.total}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
                     fill="none"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-                جاري التحميل... {downloadProgress.current}/{downloadProgress.total}
-              </>
-            ) : (
-              <>📥 تحميل كل الصور</>
-            )}
-          </button>
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                  </svg>
+                  تحميل كل الصور (ZIP)
+                </>
+              )}
+            </button>
+          </div>
+          {downloadingAll && (
+            <div className="mt-4">
+              <div className="w-full bg-neutral-700 rounded-full h-3 overflow-hidden">
+                <div
+                  className="bg-green-500 h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${
+                      (downloadProgress.current / downloadProgress.total) * 100
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -296,7 +337,10 @@ export default function SearchClient() {
                         />
                         <button
                           onClick={() =>
-                            handleDownloadSingle(product.image, product.title)
+                            handleDownloadSingle(
+                              product.image,
+                              product.title
+                            )
                           }
                           className="absolute top-2 left-2 bg-black/70 hover:bg-orange-600 text-white p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                           title="تحميل الصورة"

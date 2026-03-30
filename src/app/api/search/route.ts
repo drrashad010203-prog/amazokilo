@@ -18,6 +18,22 @@ interface SearchResult {
   error?: string;
 }
 
+const USER_AGENTS = [
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+];
+
+function getRandomUA(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function extractProductBlocks(html: string): string[] {
   const blocks: string[] = [];
   const marker = 'data-component-type="s-search-result"';
@@ -28,9 +44,10 @@ function extractProductBlocks(html: string): string[] {
     if (idx === -1) break;
 
     const nextIdx = html.indexOf(marker, idx + marker.length);
-    const block = nextIdx === -1
-      ? html.substring(idx)
-      : html.substring(idx, nextIdx);
+    const block =
+      nextIdx === -1
+        ? html.substring(idx)
+        : html.substring(idx, nextIdx);
 
     blocks.push(block);
     start = nextIdx === -1 ? html.length : nextIdx;
@@ -40,20 +57,30 @@ function extractProductBlocks(html: string): string[] {
 }
 
 function parseProduct(block: string): Product | null {
-  const imgMatch = block.match(/class="s-image"[^>]*src="([^"]+)"/);
+  const imgMatch = block.match(
+    /class="s-image"[^>]*src="([^"]+)"/
+  );
   if (!imgMatch) return null;
 
-  const titleMatch = block.match(/<h2[^>]*aria-label="([^"]{10,})"/);
+  const titleMatch = block.match(
+    /<h2[^>]*aria-label="([^"]{10,})"/
+  );
   if (!titleMatch) return null;
 
-  const linkMatch = block.match(
-    /data-cy="title-recipe"[\s\S]*?href="([^"]+)"/
-  ) || block.match(
-    /class="a-link-normal[^"]*"[^>]*href="([^"]+)"/
-  );
+  const linkMatch =
+    block.match(
+      /data-cy="title-recipe"[\s\S]*?href="([^"]+)"/
+    ) ||
+    block.match(
+      /class="a-link-normal[^"]*"[^>]*href="([^"]+)"/
+    );
 
-  const priceWholeMatch = block.match(/class="a-price-whole">([^<]+)/);
-  const priceFractionMatch = block.match(/class="a-price-fraction">([^<]+)/);
+  const priceWholeMatch = block.match(
+    /class="a-price-whole">([^<]+)/
+  );
+  const priceFractionMatch = block.match(
+    /class="a-price-fraction">([^<]+)/
+  );
 
   const ratingMatch = block.match(
     /aria-label="([\d.]+ out of 5 stars)/
@@ -80,22 +107,51 @@ function parseProduct(block: string): Product | null {
   };
 }
 
-async function searchAmazonEG(query: string): Promise<Product[]> {
-  const url = `https://www.amazon.eg/s?k=${encodeURIComponent(query)}&language=en`;
+async function fetchAmazon(
+  url: string,
+  attempt: number = 0
+): Promise<Response> {
+  const ua = getRandomUA();
+  const cookie = `session-id=${Math.floor(Math.random() * 9000000000000 + 1000000000000)}; ubid-acbeg=${Math.floor(Math.random() * 9000000000000 + 1000000000000)}`;
 
   const response = await fetch(url, {
     headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "User-Agent": ua,
       Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Accept-Encoding": "gzip, deflate, br",
-      Connection: "keep-alive",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      "Sec-Ch-Ua":
+        '"Chromium";v="125", "Not.A/Brand";v="24", "Google Chrome";v="125"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
       "Upgrade-Insecure-Requests": "1",
+      Cookie: cookie,
+      Referer: "https://www.amazon.eg/",
     },
-    next: { revalidate: 3600 },
+    redirect: "follow",
+    cache: "no-store",
   });
+
+  if (response.status === 503 && attempt < 3) {
+    await sleep(1000 + Math.random() * 2000);
+    return fetchAmazon(url, attempt + 1);
+  }
+
+  return response;
+}
+
+async function searchAmazonEG(
+  query: string
+): Promise<Product[]> {
+  const url = `https://www.amazon.eg/s?k=${encodeURIComponent(query)}&language=en`;
+
+  const response = await fetchAmazon(url);
 
   if (!response.ok) {
     throw new Error(`Amazon returned ${response.status}`);
@@ -129,32 +185,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const results: SearchResult[] = await Promise.all(
-      body.products.map(async (query) => {
-        const trimmedQuery = query.trim();
-        if (!trimmedQuery) {
-          return {
-            query: trimmedQuery,
-            products: [],
-            error: "اسم المنتج فارغ",
-          };
-        }
+    const results: SearchResult[] = [];
 
-        try {
-          const products = await searchAmazonEG(trimmedQuery);
-          return { query: trimmedQuery, products };
-        } catch (error) {
-          return {
-            query: trimmedQuery,
-            products: [],
-            error:
-              error instanceof Error
-                ? error.message
-                : "حدث خطأ أثناء البحث",
-          };
-        }
-      })
-    );
+    for (const query of body.products) {
+      const trimmedQuery = query.trim();
+      if (!trimmedQuery) {
+        results.push({
+          query: trimmedQuery,
+          products: [],
+          error: "اسم المنتج فارغ",
+        });
+        continue;
+      }
+
+      try {
+        const products = await searchAmazonEG(trimmedQuery);
+        results.push({ query: trimmedQuery, products });
+      } catch (error) {
+        results.push({
+          query: trimmedQuery,
+          products: [],
+          error:
+            error instanceof Error
+              ? error.message
+              : "حدث خطأ أثناء البحث",
+        });
+      }
+
+      if (body.products.indexOf(query) < body.products.length - 1) {
+        await sleep(500 + Math.random() * 1000);
+      }
+    }
 
     return NextResponse.json({ results });
   } catch {

@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { execSync } from "child_process";
+import { writeFileSync, readFileSync, unlinkSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 interface Product {
   title: string;
@@ -30,8 +34,39 @@ function getRandomUA(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function fetchWithCurl(url: string): string {
+  const ua = getRandomUA();
+  const tmpFile = join(tmpdir(), `amazon_${Date.now()}_${Math.random().toString(36).slice(2)}.html`);
+
+  try {
+    const curlCmd = [
+      "curl",
+      "-s",
+      "-L",
+      "--max-time 20",
+      "--connect-timeout 10",
+      `-o "${tmpFile}"`,
+      `-A "${ua}"`,
+      `-H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"`,
+      `-H "Accept-Language: en-US,en;q=0.9"`,
+      `-H "Accept-Encoding: identity"`,
+      `-H "Cache-Control: no-cache"`,
+      `-H "Sec-Fetch-Dest: document"`,
+      `-H "Sec-Fetch-Mode: navigate"`,
+      `-H "Sec-Fetch-Site: none"`,
+      `-H "Sec-Fetch-User: ?1"`,
+      `"${url}"`,
+    ].join(" ");
+
+    execSync(curlCmd, { timeout: 25000, stdio: "pipe" });
+    return readFileSync(tmpFile, "utf8");
+  } finally {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
 }
 
 function extractProductBlocks(html: string): string[] {
@@ -107,57 +142,9 @@ function parseProduct(block: string): Product | null {
   };
 }
 
-async function fetchAmazon(
-  url: string,
-  attempt: number = 0
-): Promise<Response> {
-  const ua = getRandomUA();
-  const cookie = `session-id=${Math.floor(Math.random() * 9000000000000 + 1000000000000)}; ubid-acbeg=${Math.floor(Math.random() * 9000000000000 + 1000000000000)}`;
-
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": ua,
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      "Sec-Ch-Ua":
-        '"Chromium";v="125", "Not.A/Brand";v="24", "Google Chrome";v="125"',
-      "Sec-Ch-Ua-Mobile": "?0",
-      "Sec-Ch-Ua-Platform": '"Windows"',
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-Fetch-User": "?1",
-      "Upgrade-Insecure-Requests": "1",
-      Cookie: cookie,
-      Referer: "https://www.amazon.eg/",
-    },
-    redirect: "follow",
-    cache: "no-store",
-  });
-
-  if (response.status === 503 && attempt < 3) {
-    await sleep(1000 + Math.random() * 2000);
-    return fetchAmazon(url, attempt + 1);
-  }
-
-  return response;
-}
-
-async function searchAmazonEG(
-  query: string
-): Promise<Product[]> {
+function searchAmazonEG(query: string): Product[] {
   const url = `https://www.amazon.eg/s?k=${encodeURIComponent(query)}&language=en`;
-
-  const response = await fetchAmazon(url);
-
-  if (!response.ok) {
-    throw new Error(`Amazon returned ${response.status}`);
-  }
-
-  const html = await response.text();
+  const html = fetchWithCurl(url);
   const blocks = extractProductBlocks(html);
   const products: Product[] = [];
 
@@ -199,7 +186,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const products = await searchAmazonEG(trimmedQuery);
+        const products = searchAmazonEG(trimmedQuery);
         results.push({ query: trimmedQuery, products });
       } catch (error) {
         results.push({
@@ -210,10 +197,6 @@ export async function POST(request: NextRequest) {
               ? error.message
               : "حدث خطأ أثناء البحث",
         });
-      }
-
-      if (body.products.indexOf(query) < body.products.length - 1) {
-        await sleep(500 + Math.random() * 1000);
       }
     }
 

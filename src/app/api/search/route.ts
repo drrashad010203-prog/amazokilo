@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+
+export const runtime = "nodejs";
 
 interface Product {
   title: string;
@@ -34,39 +32,108 @@ function getRandomUA(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
-function fetchWithCurl(url: string): string {
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetchWithNodeFetch(url: string): Promise<string | null> {
   const ua = getRandomUA();
-  const tmpFile = join(tmpdir(), `amazon_${Date.now()}_${Math.random().toString(36).slice(2)}.html`);
-
   try {
-    const curlCmd = [
-      "curl",
-      "-s",
-      "-L",
-      "--max-time 20",
-      "--connect-timeout 10",
-      `-o "${tmpFile}"`,
-      `-A "${ua}"`,
-      `-H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"`,
-      `-H "Accept-Language: en-US,en;q=0.9"`,
-      `-H "Accept-Encoding: identity"`,
-      `-H "Cache-Control: no-cache"`,
-      `-H "Sec-Fetch-Dest: document"`,
-      `-H "Sec-Fetch-Mode: navigate"`,
-      `-H "Sec-Fetch-Site: none"`,
-      `-H "Sec-Fetch-User: ?1"`,
-      `"${url}"`,
-    ].join(" ");
-
-    execSync(curlCmd, { timeout: 25000, stdio: "pipe" });
-    return readFileSync(tmpFile, "utf8");
-  } finally {
-    try {
-      unlinkSync(tmpFile);
-    } catch {
-      // ignore cleanup errors
-    }
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": ua,
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Sec-Ch-Ua": '"Chromium";v="125"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+      },
+      redirect: "follow",
+      cache: "no-store",
+    });
+    if (res.ok) return await res.text();
+    return null;
+  } catch {
+    return null;
   }
+}
+
+async function fetchWithCurl(url: string): Promise<string> {
+  const { execFile } = await import("child_process");
+  const { readFile, unlink } = await import("fs/promises");
+  const { join } = await import("path");
+  const { tmpdir } = await import("os");
+
+  const ua = getRandomUA();
+  const tmpFile = join(
+    tmpdir(),
+    `amazon_${Date.now()}_${Math.random().toString(36).slice(2)}.html`
+  );
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      "curl",
+      [
+        "-s",
+        "-L",
+        "--max-time",
+        "20",
+        "--connect-timeout",
+        "10",
+        "-o",
+        tmpFile,
+        "-A",
+        ua,
+        "-H",
+        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "-H",
+        "Accept-Language: en-US,en;q=0.9",
+        "-H",
+        "Accept-Encoding: identity",
+        url,
+      ],
+      { timeout: 25000 },
+      async (error) => {
+        if (error) {
+          reject(new Error(`curl failed: ${error.message}`));
+          return;
+        }
+        try {
+          const html = await readFile(tmpFile, "utf8");
+          resolve(html);
+        } catch (readErr) {
+          reject(new Error("Failed to read curl output"));
+        } finally {
+          try {
+            await unlink(tmpFile);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    );
+  });
+}
+
+async function fetchAmazonPage(url: string): Promise<string> {
+  let html = await fetchWithNodeFetch(url);
+  if (html && html.includes('data-component-type="s-search-result"')) {
+    return html;
+  }
+
+  html = await fetchWithCurl(url);
+  if (html && html.includes('data-component-type="s-search-result"')) {
+    return html;
+  }
+
+  throw new Error("Amazon returned 503 - حاول مرة أخرى بعد قليل");
 }
 
 function extractProductBlocks(html: string): string[] {
@@ -142,9 +209,11 @@ function parseProduct(block: string): Product | null {
   };
 }
 
-function searchAmazonEG(query: string): Product[] {
+async function searchAmazonEG(
+  query: string
+): Promise<Product[]> {
   const url = `https://www.amazon.eg/s?k=${encodeURIComponent(query)}&language=en`;
-  const html = fetchWithCurl(url);
+  const html = await fetchAmazonPage(url);
   const blocks = extractProductBlocks(html);
   const products: Product[] = [];
 
@@ -186,7 +255,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const products = searchAmazonEG(trimmedQuery);
+        const products = await searchAmazonEG(trimmedQuery);
         results.push({ query: trimmedQuery, products });
       } catch (error) {
         results.push({
@@ -197,6 +266,11 @@ export async function POST(request: NextRequest) {
               ? error.message
               : "حدث خطأ أثناء البحث",
         });
+      }
+
+      const idx = body.products.indexOf(query);
+      if (idx < body.products.length - 1) {
+        await sleep(500 + Math.random() * 1000);
       }
     }
 

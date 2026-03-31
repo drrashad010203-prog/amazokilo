@@ -138,7 +138,7 @@ export default function SearchClient() {
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `صور المنتجات - Amazon EG.zip`;
+      a.download = `صور المنتجات.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -223,11 +223,13 @@ export default function SearchClient() {
           <div className="flex flex-col sm:flex-row items-center gap-4">
             <div className="flex-1 text-white text-center sm:text-right">
               <p className="text-lg font-bold">
-                <span className="text-green-400 text-2xl">{totalProducts}</span>{" "}
+                <span className="text-green-400 text-2xl">
+                  {totalProducts}
+                </span>{" "}
                 صورة متاحة للتحميل
               </p>
               <p className="text-neutral-400 text-sm mt-1">
-                سيتم تحميل كل الصور كملف مضغوط واحد
+                كل الصور المتاحة لهذا المنتج
               </p>
             </div>
             <button
@@ -368,9 +370,11 @@ export default function SearchClient() {
                         >
                           {product.title}
                         </h3>
-                        <p className="text-orange-400 font-bold text-lg">
-                          {product.price}
-                        </p>
+                        {product.price && (
+                          <p className="text-orange-400 font-bold text-lg">
+                            {product.price}
+                          </p>
+                        )}
                         {product.rating && (
                           <p className="text-yellow-400 text-xs">
                             ⭐ {product.rating}

@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { execFile } from "child_process";
+import { readFile, unlink } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
+
+export const runtime = "nodejs";
 
 interface Product {
   title: string;
@@ -16,10 +22,6 @@ interface SearchResult {
   query: string;
   products: Product[];
   error?: string;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function extractProductBlocks(html: string): string[] {
@@ -93,53 +95,79 @@ function parseProduct(block: string): Product | null {
   };
 }
 
-async function fetchAmazonPage(url: string): Promise<string> {
-  const headers = {
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache",
-    "Sec-Ch-Ua":
-      '"Chromium";v="125", "Not.A/Brand";v="24", "Google Chrome";v="125"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"macOS"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    Referer: "https://www.amazon.eg/",
-  };
+function fetchWithCurl(url: string): Promise<string> {
+  const tmpFile = join(
+    tmpdir(),
+    `amz_${Date.now()}_${Math.random().toString(36).slice(2)}.html`
+  );
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch(url, {
-        headers,
-        redirect: "follow",
-        cache: "no-store",
-      });
-
-      if (res.ok) {
-        const html = await res.text();
-        if (html.includes('data-component-type="s-search-result"')) {
-          return html;
+  return new Promise((resolve, reject) => {
+    execFile(
+      "curl",
+      [
+        "-s",
+        "-L",
+        "--max-time",
+        "20",
+        "--connect-timeout",
+        "10",
+        "-o",
+        tmpFile,
+        "-A",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "-H",
+        "Accept: text/html,application/xhtml+xml",
+        "-H",
+        "Accept-Language: en-US,en;q=0.9",
+        url,
+      ],
+      { timeout: 25000 },
+      async (error) => {
+        if (error) {
+          reject(new Error(`curl failed: ${error.message}`));
+          return;
+        }
+        try {
+          readFile(tmpFile, "utf8").then((html) => {
+            unlink(tmpFile).catch(() => {});
+            resolve(html);
+          });
+        } catch {
+          reject(new Error("Failed to read curl output"));
         }
       }
+    );
+  });
+}
 
-      if (res.status === 503 || res.status === 429) {
-        await sleep(1500 + Math.random() * 2000);
-        continue;
+async function fetchAmazonPage(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const html = await res.text();
+      if (html.includes('data-component-type="s-search-result"')) {
+        return html;
       }
-    } catch {
-      await sleep(1000);
     }
+  } catch {
+    // fallback to curl
   }
 
-  throw new Error("Amazon returned 503 - حاول مرة أخرى بعد قليل");
+  const html = await fetchWithCurl(url);
+  if (html.includes('data-component-type="s-search-result"')) {
+    return html;
+  }
+
+  throw new Error("Amazon returned 503");
 }
 
 async function searchAmazonEG(query: string): Promise<Product[]> {
@@ -149,7 +177,7 @@ async function searchAmazonEG(query: string): Promise<Product[]> {
   const products: Product[] = [];
 
   for (const block of blocks) {
-    if (products.length >= 12) break;
+    if (products.length >= 10) break;
     const product = parseProduct(block);
     if (product) products.push(product);
   }
@@ -172,38 +200,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const results: SearchResult[] = [];
+    const results: SearchResult[] = await Promise.all(
+      body.products.map(async (query) => {
+        const trimmedQuery = query.trim();
+        if (!trimmedQuery) {
+          return {
+            query: trimmedQuery,
+            products: [],
+            error: "اسم المنتج فارغ",
+          };
+        }
 
-    for (const query of body.products) {
-      const trimmedQuery = query.trim();
-      if (!trimmedQuery) {
-        results.push({
-          query: trimmedQuery,
-          products: [],
-          error: "اسم المنتج فارغ",
-        });
-        continue;
-      }
-
-      try {
-        const products = await searchAmazonEG(trimmedQuery);
-        results.push({ query: trimmedQuery, products });
-      } catch (error) {
-        results.push({
-          query: trimmedQuery,
-          products: [],
-          error:
-            error instanceof Error
-              ? error.message
-              : "حدث خطأ أثناء البحث",
-        });
-      }
-
-      const idx = body.products.indexOf(query);
-      if (idx < body.products.length - 1) {
-        await sleep(800 + Math.random() * 1200);
-      }
-    }
+        try {
+          const products = await searchAmazonEG(trimmedQuery);
+          return { query: trimmedQuery, products };
+        } catch (error) {
+          return {
+            query: trimmedQuery,
+            products: [],
+            error:
+              error instanceof Error
+                ? error.message
+                : "حدث خطأ أثناء البحث",
+          };
+        }
+      })
+    );
 
     return NextResponse.json({ results });
   } catch {

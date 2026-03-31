@@ -5,11 +5,15 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**.nooncdn.com",
+        hostname: "**.amazon.eg",
       },
       {
         protocol: "https",
-        hostname: "**.noon.com",
+        hostname: "**.ssl-images-amazon.com",
+      },
+      {
+        protocol: "https",
+        hostname: "m.media-amazon.com",
       },
     ],
   },

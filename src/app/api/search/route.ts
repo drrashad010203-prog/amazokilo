@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import https from "https";
 
 interface Product {
   title: string;
@@ -19,67 +18,45 @@ interface SearchResult {
   error?: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const https = require("https");
+
 function fetchPage(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    https
-      .get(
-        url,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            Accept: "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,en;q=0.9",
-          },
+    const req = https.get(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
         },
-        (res) => {
-          if (
-            res.statusCode &&
-            res.statusCode >= 300 &&
-            res.statusCode < 400 &&
-            res.headers.location
-          ) {
-            fetchPage(res.headers.location).then(resolve).catch(reject);
-            return;
-          }
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve(data));
-          res.on("error", reject);
+        timeout: 15000,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (res: any) => {
+        if (
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          fetchPage(res.headers.location).then(resolve).catch(reject);
+          return;
         }
-      )
-      .on("error", reject);
-  });
-}
-
-function fetchImage(url: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    https
-      .get(
-        url,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          },
-        },
-        (res) => {
-          if (
-            res.statusCode &&
-            res.statusCode >= 300 &&
-            res.statusCode < 400 &&
-            res.headers.location
-          ) {
-            fetchImage(res.headers.location).then(resolve).catch(reject);
-            return;
-          }
-          const chunks: Buffer[] = [];
-          res.on("data", (chunk: Buffer) => chunks.push(chunk));
-          res.on("end", () => resolve(Buffer.concat(chunks)));
-          res.on("error", reject);
-        }
-      )
-      .on("error", reject);
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => resolve(data));
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timeout"));
+    });
   });
 }
 
@@ -212,12 +189,13 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json({ results });
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { error: "حدث خطأ في معالجة الطلب" },
+      {
+        error: "حدث خطأ في معالجة الطلب",
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }
 }
-
-export { fetchImage };

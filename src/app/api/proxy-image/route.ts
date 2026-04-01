@@ -1,34 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import https from "https";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const https = require("https");
 
 function fetchImage(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    https
-      .get(
-        url,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          },
+    const req = https.get(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         },
-        (res) => {
-          if (
-            res.statusCode &&
-            res.statusCode >= 300 &&
-            res.statusCode < 400 &&
-            res.headers.location
-          ) {
-            fetchImage(res.headers.location).then(resolve).catch(reject);
-            return;
-          }
-          const chunks: Buffer[] = [];
-          res.on("data", (chunk: Buffer) => chunks.push(chunk));
-          res.on("end", () => resolve(Buffer.concat(chunks)));
-          res.on("error", reject);
+        timeout: 15000,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (res: any) => {
+        if (
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          fetchImage(res.headers.location).then(resolve).catch(reject);
+          return;
         }
-      )
-      .on("error", reject);
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => resolve(Buffer.concat(chunks)));
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Image request timeout"));
+    });
   });
 }
 
@@ -58,9 +64,12 @@ export async function GET(request: NextRequest) {
         },
       }
     );
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { error: "Failed to fetch image" },
+      {
+        error: "Failed to fetch image",
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }

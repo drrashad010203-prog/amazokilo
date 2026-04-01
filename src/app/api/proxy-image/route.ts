@@ -1,44 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execFile } from "child_process";
-import { readFile, unlink } from "fs/promises";
-import { join } from "path";
-import { tmpdir } from "os";
+import https from "https";
 
-function fetchImageWithCurl(url: string): Promise<Buffer> {
-  const tmpFile = join(
-    tmpdir(),
-    `img_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  );
-
+function fetchImage(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    execFile(
-      "curl",
-      [
-        "-s",
-        "-L",
-        "--max-time",
-        "15",
-        "-o",
-        tmpFile,
-        "-A",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    https
+      .get(
         url,
-      ],
-      { timeout: 20000 },
-      async (error) => {
-        if (error) {
-          reject(new Error(`curl failed: ${error.message}`));
-          return;
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          },
+        },
+        (res) => {
+          if (
+            res.statusCode &&
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location
+          ) {
+            fetchImage(res.headers.location).then(resolve).catch(reject);
+            return;
+          }
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () => resolve(Buffer.concat(chunks)));
+          res.on("error", reject);
         }
-        try {
-          const buf = await readFile(tmpFile);
-          unlink(tmpFile).catch(() => {});
-          resolve(buf);
-        } catch {
-          reject(new Error("Failed to read image"));
-        }
-      }
-    );
+      )
+      .on("error", reject);
   });
 }
 
@@ -53,7 +43,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const buf = await fetchImageWithCurl(url);
+    const buf = await fetchImage(url);
     return new NextResponse(
       buf.buffer.slice(
         buf.byteOffset,

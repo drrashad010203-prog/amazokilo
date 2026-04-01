@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execFile } from "child_process";
-import { readFile, unlink } from "fs/promises";
-import { join } from "path";
-import { tmpdir } from "os";
+import https from "https";
 
 interface Product {
   title: string;
@@ -22,47 +19,67 @@ interface SearchResult {
   error?: string;
 }
 
-function fetchWithCurl(url: string): Promise<string> {
-  const tmpFile = join(
-    tmpdir(),
-    `amz_${Date.now()}_${Math.random().toString(36).slice(2)}.html`
-  );
-
+function fetchPage(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
-      "curl",
-      [
-        "-s",
-        "-L",
-        "--max-time",
-        "20",
-        "--connect-timeout",
-        "10",
-        "-o",
-        tmpFile,
-        "-A",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "-H",
-        "Accept: text/html,application/xhtml+xml",
-        "-H",
-        "Accept-Language: en-US,en;q=0.9",
+    https
+      .get(
         url,
-      ],
-      { timeout: 25000 },
-      async (error) => {
-        if (error) {
-          reject(new Error(`curl failed: ${error.message}`));
-          return;
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        },
+        (res) => {
+          if (
+            res.statusCode &&
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location
+          ) {
+            fetchPage(res.headers.location).then(resolve).catch(reject);
+            return;
+          }
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => resolve(data));
+          res.on("error", reject);
         }
-        try {
-          const html = await readFile(tmpFile, "utf8");
-          unlink(tmpFile).catch(() => {});
-          resolve(html);
-        } catch {
-          reject(new Error("Failed to read curl output"));
+      )
+      .on("error", reject);
+  });
+}
+
+function fetchImage(url: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    https
+      .get(
+        url,
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          },
+        },
+        (res) => {
+          if (
+            res.statusCode &&
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location
+          ) {
+            fetchImage(res.headers.location).then(resolve).catch(reject);
+            return;
+          }
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () => resolve(Buffer.concat(chunks)));
+          res.on("error", reject);
         }
-      }
-    );
+      )
+      .on("error", reject);
   });
 }
 
@@ -139,7 +156,7 @@ function parseProduct(block: string): Product | null {
 
 async function searchAmazonEG(query: string): Promise<Product[]> {
   const url = `https://www.amazon.eg/s?k=${encodeURIComponent(query)}&language=en`;
-  const html = await fetchWithCurl(url);
+  const html = await fetchPage(url);
   const blocks = extractProductBlocks(html);
   const products: Product[] = [];
 
@@ -202,3 +219,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export { fetchImage };

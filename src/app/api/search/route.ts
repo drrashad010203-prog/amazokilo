@@ -18,7 +18,7 @@ interface SearchResult {
   error?: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const https = require("https");
 
 function fetchPage(url: string): Promise<string> {
@@ -34,7 +34,7 @@ function fetchPage(url: string): Promise<string> {
         },
         timeout: 15000,
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (res: any) => {
         if (
           res.statusCode >= 300 &&

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const https = require("https");
 
 function fetchImage(url: string): Promise<Buffer> {
@@ -14,7 +14,7 @@ function fetchImage(url: string): Promise<Buffer> {
         },
         timeout: 15000,
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (res: any) => {
         if (
           res.statusCode >= 300 &&

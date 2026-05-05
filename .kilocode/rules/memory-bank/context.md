@@ -23,6 +23,7 @@ The app is a product catalog that fetches data from DummyJSON API and displays p
 - [x] Image optimization using Next.js Image component
 - [x] Fixed RTL layout issue (changed from dir="rtl" to standard LTR)
 - [x] Fixed favicon icon declaration in metadata
+- [x] Fixed undefined/null errors in product search and filter operations
 
 ## Current Structure
 

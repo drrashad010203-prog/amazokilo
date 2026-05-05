@@ -58,11 +58,14 @@ export default function ProductsClient() {
   }, []);
 
   const filteredProducts = useMemo(() => {
+    if (!products || !Array.isArray(products)) return [];
+    const query = searchQuery.toLowerCase();
     return products.filter((product) => {
-      const matchesSearch =
-        product.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.brand.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = !query || (
+        (product.title?.toLowerCase() || "").includes(query) ||
+        (product.description?.toLowerCase() || "").includes(query) ||
+        (product.brand?.toLowerCase() || "").includes(query)
+      );
       const matchesCategory =
         selectedCategory === "all" || product.category === selectedCategory;
       return matchesSearch && matchesCategory;

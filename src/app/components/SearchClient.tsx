@@ -41,10 +41,10 @@ export default function SearchClient() {
     setError("");
     setResults([]);
 
-    const products = input
-      .split("\n")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+      const products = input
+        ?.split("\n")
+        .map((s) => s?.trim())
+        .filter((s) => s && s.length > 0) || [];
 
     if (products.length === 0) {
       setError("من فضلك أدخل اسم منتج واحد على الأقل");
@@ -151,10 +151,10 @@ export default function SearchClient() {
     }
   }
 
-  const totalProducts = results.reduce(
-    (sum, r) => sum + r.products.length,
+  const totalProducts = results?.reduce(
+    (sum, r) => sum + (r?.products?.length || 0),
     0
-  );
+  ) || 0;
 
   return (
     <div className="space-y-8">

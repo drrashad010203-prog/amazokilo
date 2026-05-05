@@ -21,6 +21,7 @@ The app is a product catalog that fetches data from DummyJSON API and displays p
 - [x] Modern responsive CSS with Tailwind
 - [x] Product cards with image, title, price, rating, discount, and stock info
 - [x] Image optimization using Next.js Image component
+- [x] Fixed RTL layout issue (changed from dir="rtl" to standard LTR)
 
 ## Current Structure
 

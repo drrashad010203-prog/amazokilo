@@ -1,4 +1,4 @@
-# System Patterns: Next.js Starter Template
+# System Patterns: Product Catalog Application
 
 ## Architecture Overview
 
@@ -6,13 +6,14 @@
 src/
 ├── app/                    # Next.js App Router
 │   ├── layout.tsx          # Root layout + metadata
-│   ├── page.tsx            # Home page
+│   ├── page.tsx            # Home page (renders ProductsClient)
 │   ├── globals.css         # Tailwind imports + global styles
-│   └── favicon.ico         # Site icon
+│   └── components/
+│       └── ProductsClient.tsx  # Main product catalog component
 └── (expand as needed)
-    ├── components/         # React components (add when needed)
-    ├── lib/                # Utilities and helpers (add when needed)
-    └── db/                 # Database files (add via recipe)
+    ├── components/         # Additional React components
+    ├── lib/                # Utilities and helpers
+    └── db/                 # Database files (if added later)
 ```
 
 ## Key Design Patterns
@@ -31,14 +32,26 @@ src/app/
     └── route.ts       # API Route: /api
 ```
 
-### 2. Component Organization Pattern (When Expanding)
+### 2. Client Component Pattern
 
-```
-src/components/
-├── ui/                # Reusable UI components (Button, Card, etc.)
-├── layout/            # Layout components (Header, Footer)
-├── sections/          # Page sections (Hero, Features, etc.)
-└── forms/             # Form components
+The product catalog uses a client component for interactivity (search, filter, pagination):
+```tsx
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import Image from "next/image";
+
+export default function ProductsClient() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  
+  // useEffect for data fetching
+  // useMemo for filtered products
+  // render UI with Tailwind classes
+}
 ```
 
 ### 3. Server Components by Default
@@ -58,26 +71,53 @@ export default function Counter() {
 }
 ```
 
-### 4. Layout Pattern
+For this app:
+- `page.tsx` is a Server Component (no `"use client"`)
+- `ProductsClient.tsx` is a Client Component (has `"use client"`)
 
-Layouts wrap pages and can be nested:
+### 4. Data Fetching Pattern
+
+External API data (DummyJSON) is fetched directly in the client component using `fetch()` inside `useEffect`:
+```tsx
+useEffect(() => {
+  async function fetchProducts() {
+    const res = await fetch("https://dummyjson.com/products");
+    const data = await res.json();
+    setProducts(data.products);
+  }
+  fetchProducts();
+}, []);
+```
+
+This keeps it simple without needing additional API routes.
+
+### 5. State Management Pattern
+
+Local React state for UI state:
+- `products`: all fetched products
+- `searchQuery`: search input value
+- `selectedCategory`: chosen category filter
+- `currentPage`: pagination state
+- `loading`: loading indicator
+- `error`: error messages
+
+Derived state computed with `useMemo`:
+- `categories`: unique list from products
+- `filteredProducts`: products matching search + category
+- `paginatedProducts`: slice of filtered products for current page
+
+### 6. Layout Pattern
+
+Layouts wrap pages and can be nested. Current app uses single root layout:
 ```tsx
 // src/app/layout.tsx - Root layout
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="antialiased bg-neutral-900 text-white">
+        {children}
+      </body>
     </html>
-  );
-}
-
-// src/app/dashboard/layout.tsx - Nested layout
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex">
-      <Sidebar />
-      <main>{children}</main>
-    </div>
   );
 }
 ```
@@ -85,36 +125,84 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 ## Styling Conventions
 
 ### Tailwind CSS Usage
+
 - Utility classes directly on elements
-- Component composition for repeated patterns
-- Responsive: `sm:`, `md:`, `lg:`, `xl:`
+- Responsive breakpoints: `sm:`, `md:`, `lg:`, `xl:`
+- Dark theme: neutral palette with orange accents
+- Hover effects: `hover:border-orange-500/50`, `hover:bg-orange-600`
+- Transitions: `transition-all duration-300`
 
 ### Common Patterns
+
 ```tsx
-// Container
-<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+// Container with max-width
+<div className="max-w-7xl mx-auto px-4 py-8">
 
 // Responsive grid
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
 
-// Flexbox centering
-<div className="flex items-center justify-center">
+// Product card
+<div className="bg-neutral-800 border border-neutral-700 rounded-xl overflow-hidden hover:border-orange-500/50 transition-all">
 ```
 
-## File Naming Conventions
+## Component Structure
 
-- Components: PascalCase (`Button.tsx`, `Header.tsx`)
-- Utilities: camelCase (`utils.ts`, `helpers.ts`)
-- Pages/Routes: lowercase (`page.tsx`, `layout.tsx`)
-- Directories: kebab-case (`api-routes/`) or lowercase (`components/`)
+```
+ProductsClient/
+├── State hooks (useState)
+├── Derived state hooks (useMemo)
+├── Data fetching (useEffect)
+├── UI sections:
+│   ├── Search and Filter Bar
+│   │   ├── Search input
+│   │   ├── Category dropdown
+│   │   └── Active filter tags
+│   ├── Results count
+│   ├── Loading state
+│   ├── Empty state (no products)
+│   ├── Products Grid (responsive)
+│   │   └── ProductCard (repeated)
+│   └── Pagination controls
+```
 
-## State Management
+## Naming Conventions
 
-For simple needs:
-- `useState` for local component state
-- `useContext` for shared state
-- Server Components for data fetching
+- Components: PascalCase (`ProductsClient.tsx`)
+- Variables/functions: camelCase (`searchQuery`, `filteredProducts`)
+- Constants: UPPER_SNAKE_CASE (`ITEMS_PER_PAGE`)
+- Directories: kebab-case (`components/`)
+- Files: PascalCase for components, lowercase for pages
 
-For complex needs (add when necessary):
-- Zustand for client state
-- React Query for server state
+## API Integration
+
+- **Endpoint**: `https://dummyjson.com/products`
+- **Method**: GET
+- **Response Type**: `ProductsResponse { products: Product[], total: number, skip: number, limit: number }`
+- **Error Handling**: Try-catch with user-friendly error messages
+- **Image Handling**: Next.js Image with remote patterns configured
+
+## Performance Optimizations
+
+1. **Image Optimization**: `next/image` with `fill` prop and proper `sizes` attribute
+2. **Memoization**: `useMemo` for expensive filtered/paginated calculations
+3. **Lazy Loading**: Images use native lazy loading via Next.js Image
+4. **Efficient Re-renders**: State updates only when necessary
+5. **API Response Caching**: DummyJSON responses are cacheable
+
+## Error Handling Strategy
+
+- Network errors: display error banner with retry (reload)
+- Empty search results: show friendly empty state
+- Loading states: spinner with text
+- Error boundaries: not needed for this simple app, but could be added
+
+## Future Considerations
+
+- Add hydration of SSR data for better initial load
+- Add URL query params for search/filter/pagination state
+- Add skeleton loaders instead of spinner
+- Add sorting options (price, rating, etc.)
+- Add product detail page (`/products/[id]`)
+- Add compare/wishlist functionality
+- Add persistent preferences (localStorage)
+- Add debounce for search input

@@ -1,4 +1,4 @@
-import SearchClient from "./components/SearchClient";
+import ProductsClient from "./components/ProductsClient";
 
 export default function Home() {
   return (
@@ -6,15 +6,15 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         <header className="text-center mb-10">
           <h1 className="text-4xl font-bold text-white mb-3">
-            مصور منتجات أمازون مصر
+            Product Catalog
           </h1>
           <p className="text-neutral-400 text-lg max-w-2xl mx-auto">
-            ابحث عن أي منتج على أمازون مصر واحصل على كل الصور
+            Browse products from DummyJSON API - Search, filter, and paginate through our collection
           </p>
         </header>
-        <SearchClient />
+        <ProductsClient />
         <footer className="text-center mt-16 text-neutral-600 text-sm">
-          <p>النتائج مأخوذة من Amazon.eg</p>
+          <p>Data provided by DummyJSON API</p>
         </footer>
       </div>
     </main>

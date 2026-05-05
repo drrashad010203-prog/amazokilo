@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "مصور منتجات أمازون مصر",
-  description: "ابحث عن صور منتجات على أمازون مصر - أدخل اسم المنتج واحصل على الصور فوراً",
+  title: "Product Catalog",
+  description: "Browse products from DummyJSON API with search, filter, and pagination",
 };
 
 export default function RootLayout({
